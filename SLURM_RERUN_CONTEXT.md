@@ -116,9 +116,27 @@ IDM would work around it with a component the original method does not have.
 Already wired up — `config/tworoom_base.py` selects the class and sets the fraction, and
 `scripts/train_tworoom.py` forwards it. Nothing further to do to enable it.
 
-Note when comparing logs: `a0_loss` / `a_loss` / `s_loss` in `helpers.py` are divided by
-their own weights before reporting, so they stay **unweighted** and remain directly
-comparable with the pre-fix runs. The total `loss` will look different; that is expected.
+**Correction — an earlier version of this section had the next point backwards.** It said
+the reported `a0_loss` / `a_loss` / `s_loss` are divided by their own weights and so stay
+unweighted and comparable across the fix. The division is real but it *causes* a
+distortion rather than undoing one. In `helpers.py::WeightedLoss.forward`, `loss` is the
+raw elementwise error and the weighting is applied only when building `weighted_loss`; the
+per-component reports then divide that raw loss by the weights, so
+
+    reported_a_loss = true_a_loss / w
+
+With `w = 1` — every pre-fix run — the division is a no-op and the numbers were right.
+Under this reweighting `w` is 3072–24576, so a true `a_loss` of ~0.1 prints as `0.0000`:
+the change that made actions trainable is the same one that made them invisible. Gradients
+and checkpoints are unaffected, since `weighted_loss` is what the trainer backpropagates.
+
+`TokenWeightedDiffusion` therefore also overrides `p_losses` to rescale the two action
+entries of `info` back to their true magnitude. `s_loss` needs nothing: with
+`loss_discount: 1` the observation weights are all ones and that division is genuinely a
+no-op. See `BUG_REPORT_SLURM_AGENT.md` for the full analysis.
+
+Any run started before that fix logs `0.0000` for both action losses and cannot be checked
+for action learning from its log — the true value is unrecoverable at four decimals.
 
 ## 5. Training settings that are load-bearing
 
