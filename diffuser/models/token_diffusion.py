@@ -61,7 +61,44 @@ class TokenWeightedDiffusion(GaussianDiffusion):
         print(f"[ TokenWeightedDiffusion ] action dims {a}, observation dims {o}: "
               f"action weight {w:.0f} (a0 x{action_weight}), "
               f"giving actions {100 * f:.0f}% of the summed dimension weight")
+
+        ## WeightedLoss.forward reports mean(raw / w) for the action block, where `raw` is
+        ## the *unweighted* error -- the weighting only ever enters `weighted_loss`. So the
+        ## report comes out w times too small, and a true a_loss near 0.1 prints as 0.0000
+        ## once w is in the thousands. Recover it by multiplying, which is only valid when
+        ## w is constant over the slice, i.e. when action_weight == 1. See §4 of
+        ## BUG_REPORT_SLURM_AGENT.md.
+        col = weights[:, :a]
+        uniform = float(col.min()) == float(col.max())
+        ## bypass nn.Module.__setattr__: this runs mid-construction, from the parent's
+        ## __init__, and a plain float has no business in the parameter/buffer registries
+        object.__setattr__(self, "_action_report_scale",
+                           float(col.max()) if uniform else None)
+        if not uniform:
+            print("[ TokenWeightedDiffusion ] WARNING: action_weight != 1 makes the "
+                  "action weights non-uniform over time; logged a_loss/a0_loss stay on "
+                  "the weighted scale and are NOT comparable with the pre-fix runs.")
         return weights
+
+    def p_losses(self, *args, **kwargs):
+        """Rescale the action entries of the loss report back to their true magnitude.
+
+        `loss` itself is passed through untouched: it is what the trainer backpropagates
+        and it was never wrong. `s_loss` is left alone too -- its weights are discount**t
+        normalised to mean 1, and every TwoRoom config sets loss_discount 1, so that
+        slice is all ones and its division is already a no-op.
+        """
+        out = super().p_losses(*args, **kwargs)
+        loss, info = out[0], out[1]
+        scale = getattr(self, "_action_report_scale", None)
+        if scale is not None:
+            info = dict(info)
+            for key in ("a_loss", "a0_loss"):
+                if key in info:
+                    info[key] = info[key] * scale
+        ## p_losses returns (loss, info) normally but (loss, info, x_recon) under
+        ## return_rec=True; pass any extra element through rather than dropping it
+        return (loss, info, *out[2:])
 
 
 def action_weight_for(action_dim, observation_dim, action_loss_fraction=1.0 / 3.0):
