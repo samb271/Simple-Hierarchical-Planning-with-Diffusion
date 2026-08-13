@@ -141,7 +141,13 @@ the temporal stage, which LAGO has no analogue for; the spatial stage still mirr
 
 ## 6. What to run
 
-Seven independent jobs, one per config — they share nothing and should run in parallel:
+**Every configuration is retrained from scratch at 50,000 steps, across several seeds.**
+Nothing from the earlier sweep is reused: those runs predate the loss-weighting fix, so
+their actions are unusable, and the architecture changed when QK-norm was added, meaning
+their checkpoints will not even load. The single-GPU runs still going on the development
+box are kept only as a fallback in case the cluster jobs fail — do not evaluate them.
+
+Seven configs × N seeds, all independent, all in parallel:
 
 ```
 config.tworoom_hl_k2   config.tworoom_ll_k2
@@ -151,8 +157,29 @@ config.tworoom_flat
 ```
 
 ```bash
-python scripts/train_tworoom.py --dataset tworoom-expert-v0 --config config.tworoom_hl_k4
+TWOROOM_SEED=0 python scripts/train_tworoom.py \
+    --dataset tworoom-expert-v0 --config config.tworoom_hl_k4
 ```
+
+Use at least 3 seeds; the assignment asks for results "over multiple random seeds", and
+with parallel jobs training seeds are affordable where previously only evaluation seeds
+were. 7 configs × 3 seeds = 21 jobs. A complete hierarchy at a given K needs `hl_kK` and
+`ll_kK` at the *same* seed, so keep seeds aligned across levels.
+
+**Seed and budget are set through the environment, not the command line.** `utils.Parser`
+has `add_extras` commented out upstream, so `--seed 1` is accepted and then silently
+ignored — and by the time `parse_args` returns it has already seeded the RNG and built
+the experiment name, so a post-parse override is too late. `config/tworoom_base.py` reads
+them during config import instead:
+
+| variable | default | effect |
+|---|---|---|
+| `TWOROOM_SEED` | 0 | seeds the run and appends `_S<seed>` to the log directory |
+| `TWOROOM_TRAIN_STEPS` | 50000 | training budget |
+
+The seed is part of the experiment name (`tworoom_hl_k4_H80_T64_J4_S1`). Without it every
+seed of a config writes to one directory and the runs overwrite each other — check the
+log directory names on the first jobs.
 
 Confirm on the first job that the log line
 
@@ -165,18 +192,21 @@ wasted.
 
 ### Sizing
 
-Wall-clock on one 3080 Ti at 20k steps, as a scaling reference:
+Wall-clock on one 3080 Ti at 20k steps — multiply by 2.5 for the 50k budget:
 `ll_k2` ~35 min, `ll_k4` 47 min, `ll_k8` ~71 min, `hl_k8` 78 min, `hl_k4` ~2 h,
-`hl_k2` ~3.5 h, `flat` ~6 h (`flat` denoises the full 80-step horizon and dominates).
+`hl_k2` ~3.5 h, `flat` ~6 h. So at 50k, `flat` is ~15 h on that card and everything else
+is well under 9 h; size the SLURM time limits per config rather than uniformly, and give
+`flat` the most headroom. A newer cluster GPU should be comfortably faster.
 
-Two traps in the step budget:
+Two traps in the step budget, both already handled but worth knowing:
 
 - `n_epochs = int(n_train_steps // n_steps_per_epoch)` with `n_steps_per_epoch = 10000`,
   so **`n_train_steps` must be a multiple of 10,000** or the remainder is silently
-  dropped. `2.5e4` trains for 20,000 steps, not 25,000.
-- Checkpoints are written when `step % save_freq == 0` over steps `0..n-1`, so a 20,000
-  step run's **last checkpoint is step 15,000**. Either raise the budget or save at the
-  end; do not report a budget the checkpoints do not reflect.
+  dropped — `2.5e4` trained for 20,000 steps, not 25,000. 50,000 divides cleanly, and
+  `train_tworoom.py` now warns if a budget does not.
+- Checkpoints are written on `step % save_freq == 0` over steps `0..n-1`, so the last
+  periodic save of a 50k run is step 45,000. `train_tworoom.py` now saves once more after
+  the loop, giving `state_50000.pt`. Evaluate that one.
 
 Memory: `grad_checkpoint=True` is set for `hl_k2`, `hl_k4` and `flat`, which otherwise
 exceed 12 GB. On a larger card it can be turned off for speed — it changes memory and
@@ -225,9 +255,8 @@ Still open:
   held-out frames within the 16 px radius. Within a *fixed* scene the correlation between
   token distance and pixel distance is 0.90, so a per-episode calibration against the
   executed rollout is the promising direction. It was descoped under time pressure.
-- **Multiple seeds.** Every config trains at `seed: 0`. Parallel jobs make training seeds
-  affordable now; otherwise vary evaluation seeds via `repeat_per_difficulty` and disclose
-  the single training seed.
+- **Seeds.** Training seeds are now covered by §6. Report mean and standard error across
+  them, and additionally vary evaluation episodes via `repeat_per_difficulty`.
 - **Capacity matching.** The patch denoiser is 2.78M parameters against LAGO's 14.78M —
   the assignment asks for matched capacity. LAGO's `transformer_dim` is pinned at
   `image_emb_dim + condition_dim` = 448, so `depth` is the only free knob: depth 1 gives

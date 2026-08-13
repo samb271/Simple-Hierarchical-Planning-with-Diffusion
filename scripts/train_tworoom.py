@@ -160,6 +160,11 @@ print("✓")
 # -----------------------------------------------------------------------------#
 
 n_epochs = int(args.n_train_steps // args.n_steps_per_epoch)
+if n_epochs * args.n_steps_per_epoch != args.n_train_steps:
+    ## the loop can only run whole epochs, so a remainder is trained away silently
+    print(f"[ train_tworoom ] WARNING: n_train_steps={args.n_train_steps:.0f} is not a "
+          f"multiple of n_steps_per_epoch={args.n_steps_per_epoch}; training "
+          f"{n_epochs * args.n_steps_per_epoch} steps instead.")
 eval_sample_n = 3
 
 train_writer = SummaryWriter(log_dir=args.savepath + "-train")
@@ -167,3 +172,9 @@ for i in range(n_epochs):
     print(f"Epoch {i} / {n_epochs} | {args.savepath}")
 
     trainer.train(n_train_steps=args.n_steps_per_epoch, writer=train_writer)
+
+## Trainer saves on `step % save_freq == 0` over steps 0..n-1, so the last checkpoint of
+## a 50k run is step 45,000 and the final tenth of training is never written out. Save
+## once more here, in our script, rather than touching the original Trainer.
+trainer.save(trainer.step)
+print(f"[ train_tworoom ] final checkpoint at step {trainer.step}: {args.savepath}")

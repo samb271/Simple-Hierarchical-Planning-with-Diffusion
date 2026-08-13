@@ -9,21 +9,36 @@ so K and the level are the only moving parts across the study. See EVALUATION_PL
     flat       : horizon H,   jump 1  -> model horizon H
 """
 
+import os
+
 from diffuser.utils import watch
 
 HORIZON = 80
 EPISODE_LENGTH = 80
 logbase = "logs"
 
+## Seed and budget come from the environment rather than the command line, because
+## utils.Parser has `add_extras` commented out upstream: `--seed 1` is accepted and then
+## silently ignored, and by the time parse_args returns it has already seeded the RNG and
+## built the experiment name. Reading them here happens during read_config, early enough
+## for both. One SLURM job per (config, seed) then needs only TWOROOM_SEED set.
+SEED = int(os.environ.get("TWOROOM_SEED", 0))
+## must be a multiple of n_steps_per_epoch (10,000): the training loop runs
+## int(n_train_steps // n_steps_per_epoch) epochs and silently drops the remainder.
+N_TRAIN_STEPS = float(os.environ.get("TWOROOM_TRAIN_STEPS", 5e4))
+
 diffusion_args_to_watch = [
     ("prefix", ""),
     ("horizon", "H"),
     ("n_diffusion_steps", "T"),
     ("jump", "J"),
+    ## without the seed in the path every seed of a config writes to one directory and
+    ## the runs overwrite each other's checkpoints
+    ("seed", "S"),
 ]
 
 
-def make(prefix, horizon, jump, jump_action, dim=128, n_train_steps=2.5e4,
+def make(prefix, horizon, jump, jump_action, dim=128, n_train_steps=None,
          grad_checkpoint=False):
     """Build a `base` dict for one run.
 
@@ -85,7 +100,7 @@ def make(prefix, horizon, jump, jump_action, dim=128, n_train_steps=2.5e4,
             ## training
             "n_steps_per_epoch": 10000,
             "loss_type": "l2",
-            "n_train_steps": n_train_steps,
+            "n_train_steps": N_TRAIN_STEPS if n_train_steps is None else n_train_steps,
             ## batch 32 with no accumulation, matching spwm's worldplanner exactly.
             ## Batch size is a scientific parameter here, not a throughput knob.
             "batch_size": 32,
@@ -103,7 +118,7 @@ def make(prefix, horizon, jump, jump_action, dim=128, n_train_steps=2.5e4,
             "n_samples": 4,
             "bucket": None,
             "device": "cuda",
-            "seed": 0,
+            "seed": SEED,
             ## the stock Trainer fixes num_workers at 1, which serialises multi-GB
             ## memmap reads. Consumed by scripts/train_tworoom.py.
             "n_workers": 12,
