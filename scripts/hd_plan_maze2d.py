@@ -6,13 +6,15 @@ import pdb
 from diffuser.guides.policies import Policy
 import diffuser.datasets as datasets
 import diffuser.utils as utils
-from diffuser.models.hier_diffusion import HierDiffusion
 import os
 
 
 class HLParser(utils.Parser):
     dataset: str = "maze2d-large-v1"
-    config: str = "config.maze2d_hl"
+    ## both parsers below read the same argv, so a single --config would apply to
+    ## each of them; env vars let the high- and low-level configs differ. unset,
+    ## the defaults are the published ones and behaviour is unchanged.
+    config: str = os.environ.get("HL_CONFIG", "config.maze2d_hl")
 
 
 hl_args = HLParser().parse_args("plan")
@@ -20,7 +22,7 @@ hl_args = HLParser().parse_args("plan")
 
 class LLParser(utils.Parser):
     dataset: str = "maze2d-large-v1"
-    config: str = "config.maze2d_ll"
+    config: str = os.environ.get("LL_CONFIG", "config.maze2d_ll")
 
 
 ll_args = LLParser().parse_args("plan")

@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+## training output: checkpoints and per-run logs, several GB per sweep
+logs/
+outputs/
+
+## datasets and the DINOv2 token cache live outside the tree (the cache is ~45 GB);
+## point TWOROOM_H5 / TWOROOM_TOKEN_CACHE at them instead of committing them
+*.h5
+*.npy
+*.mp4
+
+.DS_Store
