@@ -106,6 +106,9 @@ diffusion_config = utils.Config(
     action_weight=args.action_weight,
     loss_weights=args.loss_weights,
     loss_discount=args.loss_discount,
+    ## share of the summed dimension weights given to actions. Without it they are
+    ## 2 dims out of 98,306 and are never learned; see models/token_diffusion.py.
+    action_loss_fraction=args.action_loss_fraction,
     device=args.device,
 )
 

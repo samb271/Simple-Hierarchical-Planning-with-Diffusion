@@ -39,13 +39,20 @@ def make(prefix, horizon, jump, jump_action, dim=128, n_train_steps=2.5e4,
             ## time. The flat DiffusionTransformer collapses the grid to one vector
             ## per timestep and is kept only as an ablation.
             "model": "models.patch_transformer.PatchDiffusionTransformer",
-            "diffusion": "models.GaussianDiffusion",
+            ## GaussianDiffusion with the action dimensions reweighted. Under the stock
+            ## weighting actions are 2 dims out of 98,306, get 0.002% of the gradient
+            ## and are never learned -- states came out fine but the plans were
+            ## unexecutable. See models/token_diffusion.py.
+            "diffusion": "models.token_diffusion.TokenWeightedDiffusion",
             "horizon": horizon,
             "jump": jump,
             "jump_action": jump_action,
             "condition": True,
             "n_diffusion_steps": 64,
             "action_weight": 1,
+            ## 1/3 reproduces maze2d's own action share (2 action dims out of 6), so the
+            ## balance is inherited from the original method rather than tuned here.
+            "action_loss_fraction": 1.0 / 3.0,
             "loss_weights": None,
             "loss_discount": 1,
             "predict_epsilon": False,
